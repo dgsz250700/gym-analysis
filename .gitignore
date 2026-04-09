@@ -1,3 +1,11 @@
+# Scope this repository only to the gym project and its top-level helper script.
+/*
+!/.gitignore
+!/gym/
+!/gym/**
+!/gym_try.py
+
+# Generic ignores that still apply inside allowed paths.
 .env
 .env.*
 node_modules/
@@ -6,3 +14,12 @@ node_modules/
 Thumbs.db
 tmp/
 temp/
+**/__pycache__/
+*.py[cod]
+~$*
+
+# Generated app outputs inside the gym project.
+/gym/bulgarian/ui_runs/
+/gym/bulgarian/*_interpolated_segments.csv
+/gym/bulgarian/*_segment_comparison.csv
+/gym/bulgarian/*_overlay.mp4
