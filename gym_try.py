@@ -9,6 +9,8 @@ video_dir = Path(r"C:/Users/WINDOWS/Documents/gym/bulgarian")
 model_filename = "pose_landmarker_full.task"
 output_csv_path = video_dir / "bulgarian_angles.csv"
 output_changes_csv_path = video_dir / "bulgarian_angle_changes.csv"
+output_interpolated_csv_path = video_dir / "bulgarian_interpolated_segments.csv"
+output_segment_averages_csv_path = video_dir / "bulgarian_segment_averages.csv"
 video_extensions = {".mp4", ".mov", ".avi", ".mkv", ".m4v"}
 
 inicio_segundo = 0
@@ -58,6 +60,38 @@ CHANGE_FIELDNAMES = [
     "delta_previo_deg",
     "delta_actual_deg",
     "cambio_direccion",
+]
+
+# Por ahora estas son las metricas de interes; luego se pueden volver configurables.
+INTEREST_FIELDS = [
+    "knee_angle_deg",
+    "torso_inclination_abs_deg",
+    "neck_inclination_abs_deg",
+]
+
+INTERPOLATED_FIELDNAMES = [
+    "video_name",
+    "segment_id",
+    "segment_type",
+    "start_change_direction",
+    "end_change_direction",
+    "start_frame",
+    "end_frame",
+    "start_tiempo_ms",
+    "end_tiempo_ms",
+    "segment_frame_count",
+    "segment_valid_frame_count",
+    "normalized_percent",
+    *INTEREST_FIELDS,
+]
+
+AVERAGE_FIELDNAMES = [
+    "segment_type",
+    "start_change_direction",
+    "end_change_direction",
+    "normalized_percent",
+    "segment_count",
+    *[f"avg_{field_name}" for field_name in INTEREST_FIELDS],
 ]
 
 
@@ -192,6 +226,214 @@ def append_rows_to_csv(csv_path, rows, write_header, fieldnames):
         if write_header:
             writer.writeheader()
         writer.writerows(rows)
+
+
+def normalizar_cambio_direccion(cambio_direccion):
+    if cambio_direccion in {"baja_a_sube", "sube_a_baja"}:
+        return cambio_direccion
+    return None
+
+
+def interpolar_valores_lineales(xs, ys, target_xs):
+    if not xs or not ys:
+        return [None for _ in target_xs]
+
+    if len(xs) == 1:
+        return [round(ys[0], 2) for _ in target_xs]
+
+    resultados = []
+    indice = 0
+
+    for target_x in target_xs:
+        if target_x <= xs[0]:
+            resultados.append(round(ys[0], 2))
+            continue
+
+        if target_x >= xs[-1]:
+            resultados.append(round(ys[-1], 2))
+            continue
+
+        while indice + 1 < len(xs) and xs[indice + 1] < target_x:
+            indice += 1
+
+        x0 = xs[indice]
+        x1 = xs[indice + 1]
+        y0 = ys[indice]
+        y1 = ys[indice + 1]
+
+        if x1 == x0:
+            valor = y1
+        else:
+            proporcion = (target_x - x0) / (x1 - x0)
+            valor = y0 + (y1 - y0) * proporcion
+
+        resultados.append(round(valor, 2))
+
+    return resultados
+
+
+def interpolar_segmento(rows_segmento, start_frame, end_frame, field_name):
+    frame_span = end_frame - start_frame
+    xs = []
+    ys = []
+
+    for row in rows_segmento:
+        value = row.get(field_name)
+        if value is None:
+            continue
+
+        if frame_span == 0:
+            normalized_position = 0.0
+        else:
+            normalized_position = ((row["frame"] - start_frame) / frame_span) * 100
+
+        xs.append(normalized_position)
+        ys.append(value)
+
+    return interpolar_valores_lineales(xs, ys, list(range(101)))
+
+
+def construir_segmentos_interpolados(video_path, rows, cambios_rows):
+    eventos_segmentacion = []
+
+    for cambio in cambios_rows:
+        cambio_direccion = normalizar_cambio_direccion(cambio["cambio_direccion"])
+        if cambio_direccion is None:
+            continue
+
+        eventos_segmentacion.append(
+            {
+                "frame": cambio["frame_cambio"],
+                "tiempo_ms": cambio["tiempo_ms"],
+                "change_direction": cambio_direccion,
+            }
+        )
+
+    if len(eventos_segmentacion) < 2:
+        return []
+
+    eventos_segmentacion.sort(key=lambda evento: evento["frame"])
+    rows_confiables = [row for row in rows if row["landmarks_confiables"]]
+    rows_interpolados = []
+
+    for segment_id, (start_event, end_event) in enumerate(
+        zip(eventos_segmentacion, eventos_segmentacion[1:]),
+        start=1,
+    ):
+        if end_event["frame"] <= start_event["frame"]:
+            continue
+
+        rows_segmento = [
+            row
+            for row in rows_confiables
+            if start_event["frame"] <= row["frame"] <= end_event["frame"]
+        ]
+
+        if not rows_segmento:
+            continue
+
+        interpolaciones = {
+            field_name: interpolar_segmento(
+                rows_segmento,
+                start_event["frame"],
+                end_event["frame"],
+                field_name,
+            )
+            for field_name in INTEREST_FIELDS
+        }
+
+        segment_type = f"{start_event['change_direction']}|{end_event['change_direction']}"
+        segment_frame_count = end_event["frame"] - start_event["frame"] + 1
+        segment_valid_frame_count = len(rows_segmento)
+
+        for normalized_percent in range(101):
+            row_interpolado = {
+                "video_name": video_path.name,
+                "segment_id": segment_id,
+                "segment_type": segment_type,
+                "start_change_direction": start_event["change_direction"],
+                "end_change_direction": end_event["change_direction"],
+                "start_frame": start_event["frame"],
+                "end_frame": end_event["frame"],
+                "start_tiempo_ms": start_event["tiempo_ms"],
+                "end_tiempo_ms": end_event["tiempo_ms"],
+                "segment_frame_count": segment_frame_count,
+                "segment_valid_frame_count": segment_valid_frame_count,
+                "normalized_percent": normalized_percent,
+            }
+
+            for field_name in INTEREST_FIELDS:
+                row_interpolado[field_name] = interpolaciones[field_name][normalized_percent]
+
+            rows_interpolados.append(row_interpolado)
+
+    return rows_interpolados
+
+
+def parse_optional_float(value):
+    if value in (None, ""):
+        return None
+    return float(value)
+
+
+def construir_promedios_segmentos(csv_interpolado_path):
+    if not csv_interpolado_path.exists():
+        return []
+
+    acumulados = {}
+
+    with open(csv_interpolado_path, "r", newline="", encoding="utf-8") as csv_file:
+        reader = csv.DictReader(csv_file)
+
+        for row in reader:
+            normalized_percent = int(row["normalized_percent"])
+            group_key = (
+                row["segment_type"],
+                row["start_change_direction"],
+                row["end_change_direction"],
+                normalized_percent,
+            )
+
+            if group_key not in acumulados:
+                acumulados[group_key] = {
+                    "segment_ids": set(),
+                    "sumas": {field_name: 0.0 for field_name in INTEREST_FIELDS},
+                    "conteos": {field_name: 0 for field_name in INTEREST_FIELDS},
+                }
+
+            acumulado = acumulados[group_key]
+            acumulado["segment_ids"].add((row["video_name"], row["segment_id"]))
+
+            for field_name in INTEREST_FIELDS:
+                value = parse_optional_float(row.get(field_name))
+                if value is None:
+                    continue
+                acumulado["sumas"][field_name] += value
+                acumulado["conteos"][field_name] += 1
+
+    rows_promedio = []
+
+    for group_key in sorted(acumulados, key=lambda key: (key[0], key[3])):
+        segment_type, start_change_direction, end_change_direction, normalized_percent = group_key
+        acumulado = acumulados[group_key]
+        row_promedio = {
+            "segment_type": segment_type,
+            "start_change_direction": start_change_direction,
+            "end_change_direction": end_change_direction,
+            "normalized_percent": normalized_percent,
+            "segment_count": len(acumulado["segment_ids"]),
+        }
+
+        for field_name in INTEREST_FIELDS:
+            count = acumulado["conteos"][field_name]
+            if count == 0:
+                row_promedio[f"avg_{field_name}"] = None
+            else:
+                row_promedio[f"avg_{field_name}"] = round(acumulado["sumas"][field_name] / count, 2)
+
+        rows_promedio.append(row_promedio)
+
+    return rows_promedio
 
 
 def procesar_video(video_path):
@@ -412,6 +654,10 @@ if not videos:
 
 videos_ya_procesados, escribir_header = preparar_csv(output_csv_path, FIELDNAMES)
 videos_con_cambios, escribir_header_cambios = preparar_csv(output_changes_csv_path, CHANGE_FIELDNAMES)
+videos_con_interpolados, escribir_header_interpolados = preparar_csv(
+    output_interpolated_csv_path,
+    INTERPOLATED_FIELDNAMES,
+)
 
 if reprocesar_todos:
     videos_pendientes = videos
@@ -419,17 +665,23 @@ else:
     videos_pendientes = [
         video
         for video in videos
-        if video.name not in videos_ya_procesados or video.name not in videos_con_cambios
+        if (
+            video.name not in videos_ya_procesados
+            or video.name not in videos_con_cambios
+            or video.name not in videos_con_interpolados
+        )
     ]
 
 print(f"Videos encontrados: {len(videos)}")
 print(f"Videos pendientes: {len(videos_pendientes)}")
 
 frames_totales = 0
+filas_interpoladas_totales = 0
 
 for video_path in videos_pendientes:
     print(f"Procesando: {video_path.name}")
     rows, cambios_rows, detener_todo = procesar_video(video_path)
+    interpolated_rows = construir_segmentos_interpolados(video_path, rows, cambios_rows)
 
     if reprocesar_todos or video_path.name not in videos_ya_procesados:
         append_rows_to_csv(output_csv_path, rows, escribir_header, FIELDNAMES)
@@ -442,10 +694,36 @@ for video_path in videos_pendientes:
         escribir_header_cambios = False
         print(f"Cambios de direccion guardados para {video_path.name}: {len(cambios_rows)}")
 
+    if reprocesar_todos or video_path.name not in videos_con_interpolados:
+        append_rows_to_csv(
+            output_interpolated_csv_path,
+            interpolated_rows,
+            escribir_header_interpolados,
+            INTERPOLATED_FIELDNAMES,
+        )
+        escribir_header_interpolados = False
+        filas_interpoladas_totales += len(interpolated_rows)
+        print(
+            f"Segmentos interpolados guardados para {video_path.name}: "
+            f"{len(interpolated_rows) // 101 if interpolated_rows else 0} "
+            f"({len(interpolated_rows)} filas)"
+        )
+
     if detener_todo:
         print("Procesamiento detenido por el usuario.")
         break
 
+rows_promedio_segmentos = construir_promedios_segmentos(output_interpolated_csv_path)
+append_rows_to_csv(
+    output_segment_averages_csv_path,
+    rows_promedio_segmentos,
+    True,
+    AVERAGE_FIELDNAMES,
+)
+
 print(f"Frames agregados al CSV en esta corrida: {frames_totales}")
+print(f"Filas interpoladas agregadas al CSV en esta corrida: {filas_interpoladas_totales}")
 print(f"CSV final: {output_csv_path}")
 print(f"CSV de cambios: {output_changes_csv_path}")
+print(f"CSV interpolado: {output_interpolated_csv_path}")
+print(f"CSV de promedios por segmento: {output_segment_averages_csv_path}")
