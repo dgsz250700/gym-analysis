@@ -1,9 +1,22 @@
-# Scope this repository only to the gym project and its top-level helper script.
+# Scope this repository to gym source code and docs only.
 /*
 !/.gitignore
+!/CLAUDE.md
 !/gym/
-!/gym/**
+/gym/**
+!/gym/**/
+!/gym/*.md
+!/gym/**/*.md
+!/gym/*.py
+!/gym/**/*.py
 !/gym_try.py
+!/gym/bulgarian/bulgarian_angle_changes.csv
+!/gym/bulgarian/bulgarian_angles.csv
+!/gym/bulgarian/bulgarian_interpolated_segments.csv
+!/gym/bulgarian/bulgarian_segment_averages.csv
+
+# Local scratch scripts that are not part of the documented project surface.
+/gym/process_data.py
 
 # Generic ignores that still apply inside allowed paths.
 .env
@@ -17,9 +30,3 @@ temp/
 **/__pycache__/
 *.py[cod]
 ~$*
-
-# Generated app outputs inside the gym project.
-/gym/bulgarian/ui_runs/
-/gym/bulgarian/*_interpolated_segments.csv
-/gym/bulgarian/*_segment_comparison.csv
-/gym/bulgarian/*_overlay.mp4

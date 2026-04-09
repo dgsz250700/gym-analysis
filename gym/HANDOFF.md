@@ -1,185 +1,187 @@
-# Handoff
+# HANDOFF
 
-## Resumen rapido
+Current handoff for the next agent.
 
-Proyecto de analisis biomecanico por video usando MediaPipe Pose.
+Use this after reading `AGENTS.md`, `ARCHITECTURE.md`, and `SPEC.md`.
 
-Hoy el caso operativo es:
+## Current snapshot
 
-- ejercicio: Bulgarian Split Squat
-- referencia: dataset en `gym/bulgarian/`
-- pipeline de referencia: `../gym_try.py`
-- pipeline de input: `gym/bulgarian/gym_input.py`
-- UI: `gym/bulgarian/gym_input_ui.py`
+- Domain: local desktop video analysis for gym technique
+- Supported exercise: Bulgarian Split Squat only
+- Reference builder: `C:\Users\WINDOWS\Documents\gym_try.py`
+- Input analyzer: `C:\Users\WINDOWS\Documents\gym\bulgarian\gym_input.py`
+- UI: `C:\Users\WINDOWS\Documents\gym\bulgarian\gym_input_ui.py`
+- Actual Git root: `C:\Users\WINDOWS\Documents`
+- Logical project root: `C:\Users\WINDOWS\Documents\gym`
 
-## Estado actual
+## What is stable today
 
-### Lo que ya funciona
+- per-frame pose processing with MediaPipe
+- knee direction change detection
+- segment creation between consecutive change events
+- interpolation to `0..100`
+- segment averaging for the reference dataset
+- segment-to-reference percentage comparison
+- qualitative assessment labels
+- overlay video generation
+- a minimal `tkinter` UI that wraps `run_analysis(...)`
 
-- generacion de CSV de landmarks por frame
-- deteccion de cambios de direccion en rodilla
-- segmentacion del movimiento
-- interpolacion lineal `0..100`
-- promedio por tipo de segmento
-- comparacion porcentual contra referencia
-- etiquetado cualitativo del resultado
-- overlay de input vs promedio
-- UI minima con selector de video y boton para abrir el CSV
+## What is intentionally not in Git
 
-### Archivos clave
+The repo is meant to keep source and docs only.
 
-- `../gym_try.py`
-  - genera la referencia desde videos base
-- `gym/bulgarian/gym_input.py`
-  - backend del flujo de input
-  - expone `run_analysis(...)`
-- `gym/bulgarian/gym_input_ui.py`
-  - UI en `tkinter`
-- `gym/pose_landmarker_full.task`
-  - modelo principal
+Local runtime artifacts should stay out of version control:
 
-## Outputs canonicos
+- source videos
+- non-canonical generated CSVs
+- `.task` model files
+- image references
+- `ui_runs/`
 
-### Referencia
+Canonical reference CSVs that are intentionally kept in Git:
 
-- `bulgarian_angles.csv`
-- `bulgarian_angle_changes.csv`
-- `bulgarian_interpolated_segments.csv`
-- `bulgarian_segment_averages.csv`
+- `gym/bulgarian/bulgarian_angle_changes.csv`
+- `gym/bulgarian/bulgarian_angles.csv`
+- `gym/bulgarian/bulgarian_interpolated_segments.csv`
+- `gym/bulgarian/bulgarian_segment_averages.csv`
 
-### Por input
+Important implication:
 
-- `*_angles.csv`
-- `*_angle_changes.csv`
-- `*_interpolated_segments.csv`
-- `*_segment_averages.csv`
-- `*_segment_comparison.csv`
-- `*_overlay.mp4`
+- a clean clone may not be runnable until the local model and reference artifacts are present
 
-La UI guarda cada corrida en una subcarpeta unica tipo:
+## Runtime dependencies that another agent must expect
 
-- `bulgarian/ui_runs/<video>_ui_<timestamp>/`
+Required local assets:
 
-Esto se hizo para evitar bloqueos de archivos entre corridas.
+- input video
+- MediaPipe model file, usually `gym/pose_landmarker_full.task`
+- reference averages CSV
+- reference angles CSV
+- reference changes CSV
 
-## Decisiones importantes ya tomadas
+Default backend expectations:
 
-1. Los eventos de segmento se nombran con los labels originales:
-   - `baja_a_sube`
-   - `sube_a_baja`
-2. La comparacion se hace por `segment_type`, no por video completo.
-3. El feedback cualitativo usa porcentaje absoluto promedio.
-4. La evaluacion general del segmento toma la peor variable.
-5. La referencia visual del overlay se reconstruye usando landmarks normalizados, no solo angulos.
+- `gym/bulgarian/bulgarian_segment_averages.csv`
+- `gym/bulgarian/bulgarian_angles.csv`
+- `gym/bulgarian/bulgarian_angle_changes.csv`
 
-## Riesgos / deuda tecnica
+Additional canonical reference artifact kept in Git:
 
-### 1. Estructura del proyecto
+- `gym/bulgarian/bulgarian_interpolated_segments.csv`
 
-El repo Git real esta en `C:\Users\WINDOWS\Documents`, no en `gym/`.
+## Architectural decisions already taken
 
-Eso significa que:
+- Comparison is done per segment, not per whole video.
+- `segment_type` is the join key between input and reference.
+- Qualitative feedback is based on mean absolute percentage difference.
+- `segment_assessment` is the worst field-level assessment.
+- The overlay reconstructs an average reference pose from normalized pose data, not just angle curves.
+- The UI writes each run to a unique timestamped folder to avoid file locking issues.
 
-- `gym/` no es la raiz Git
-- `gym_try.py` vive fuera de `gym/`
-- para otra persona o agente esto no es obvio
+## Fragile areas
 
-Ideal futuro:
+### 1. Project layout
 
-- mover el flujo completo a una raiz de proyecto consistente
+- `gym_try.py` still lives outside `gym/`
+- Git root is still above the logical project root
+- this is easy for humans and agents to miss
 
-### 2. Hardcoding del ejercicio
+### 2. Reference and input contract
 
-Muchos defaults siguen acoplados a Bulgarian:
+- `gym_try.py` and `gym_input.py` must agree on:
+  - event labels
+  - `segment_type`
+  - interest field names
+  - CSV column expectations
 
-- nombres de CSV
-- carpeta de referencia
-- variables de interes
-- criterio de comparacion
+### 3. Mixed naming style
 
-### 3. Datos generados mezclados con datos fuente
+- `gym_try.py` is mostly Spanish
+- `gym_input.py` is mostly English
+- string labels inside the data remain Spanish
 
-`bulgarian/` contiene:
+### 4. No automated tests
 
-- videos base
-- videos de prueba
-- CSV derivados
-- overlays
-- scripts
+- breakage risk is highest around:
+  - segmentation
+  - interpolation
+  - overlay alignment
+  - CSV compatibility
 
-Conviene separar al menos:
+## Symptom-driven debugging
 
-- `data/raw`
-- `data/reference`
-- `data/runs`
-- `src`
+### If the backend raises missing-file errors
 
-### 4. UI minima
+Check:
 
-La UI es funcional pero simple:
+- model path
+- reference CSV paths
+- whether local assets exist outside Git
 
-- no tiene barra de progreso real
-- no permite configurar ejercicio
-- no embebe una tabla del CSV
-- solo abre el archivo en Excel
+### If comparison rows are empty
 
-## Que revisar primero si algo falla
+Check:
 
-### Si falla la UI despues de varias corridas
+- that `process_video(...)` produced direction changes
+- that input `segment_type` values match reference `segment_type` values exactly
+- that the reference CSV still has the expected headers
 
-Revisar:
+### If the overlay looks misaligned
 
-- que se sigan creando carpetas unicas en `ui_runs/`
-- que no haya callbacks de reproduccion colgados
-- que el `overlay.mp4` exista en la salida
-
-### Si el overlay sale mal alineado
-
-Revisar:
+Check:
 
 - `build_reference_pose_index(...)`
 - `normalize_pose_points(...)`
 - `denormalize_pose_points(...)`
 - `render_overlay_video(...)`
 
-### Si la comparacion sale vacia
+### If the UI behaves badly after repeated runs
 
-Revisar:
+Check:
 
-- `segment_type` del input
-- si existe el mismo `segment_type` en `bulgarian_segment_averages.csv`
-- cantidad de cambios detectados en `*_angle_changes.csv`
+- unique `ui_runs/<video>_ui_<timestamp>` output folders
+- playback callback cleanup
+- that the generated overlay file exists before playback starts
 
-## Siguientes pasos recomendados
+## Highest-value next steps
 
-1. mover `gym_try.py` dentro de `gym/`
-2. extraer constantes/config a un modulo comun
-3. volver configurables las variables de interes por ejercicio
-4. separar datos fuente de outputs generados
-5. decidir si la UI seguira en `tkinter` o se migrara a web/desktop mas robusto
-6. agregar tests para:
-   - segmentacion
-   - interpolacion
-   - clasificacion de feedback
-   - render de overlay
+1. Move `gym_try.py` into `gym/` or extract a shared package used by both pipelines.
+2. Extract shared config and constants into a common module.
+3. Parameterize exercise-specific settings instead of hardcoding Bulgarian-specific behavior.
+4. Separate raw data, reference data, runtime outputs, and source code more clearly.
+5. Add automated tests for segmentation, interpolation, feedback classification, and overlay behavior.
 
-## Comandos utiles
+## Recommended first actions for a new agent
 
-### CLI input
+1. Read `AGENTS.md`, `ARCHITECTURE.md`, and `SPEC.md`.
+2. Run `py_compile` on the three active Python entrypoints.
+3. Confirm whether local model and reference CSVs are available.
+4. Only then attempt runtime debugging or feature work.
 
-```powershell
-python C:\Users\WINDOWS\Documents\gym\bulgarian\gym_input.py
-```
+## Useful commands
 
-### UI
+Compile-only sanity check:
 
 ```powershell
-python C:\Users\WINDOWS\Documents\gym\bulgarian\gym_input_ui.py
+python -m py_compile C:\Users\WINDOWS\Documents\gym_try.py
+python -m py_compile C:\Users\WINDOWS\Documents\gym\bulgarian\gym_input.py
+python -m py_compile C:\Users\WINDOWS\Documents\gym\bulgarian\gym_input_ui.py
 ```
 
-### Rebuild referencia
+Rebuild reference:
 
 ```powershell
 python C:\Users\WINDOWS\Documents\gym_try.py
 ```
 
+Run CLI analysis:
+
+```powershell
+python C:\Users\WINDOWS\Documents\gym\bulgarian\gym_input.py
+```
+
+Run UI:
+
+```powershell
+python C:\Users\WINDOWS\Documents\gym\bulgarian\gym_input_ui.py
+```

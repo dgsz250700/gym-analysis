@@ -25,9 +25,11 @@ La estructura actual no esta totalmente consolidada en una sola carpeta:
 - `bulgarian/gym_input_ui.py`
   - Interfaz basica en `tkinter`.
 - `pose_landmarker_full.task`
-  - Modelo de MediaPipe usado por el pipeline.
+  - Modelo local de MediaPipe usado por el pipeline.
+  - No se versiona en Git.
 - `bulgarian/`
-  - Dataset del ejercicio, pruebas, outputs y scripts asociados al flujo actual.
+  - Dataset local del ejercicio, pruebas, outputs y scripts asociados al flujo actual.
+  - Los 4 CSV de referencia canonicos si se versionan en Git.
 
 ## Flujo actual
 
@@ -54,6 +56,13 @@ Para cada video input se generan:
 - `*_segment_averages.csv`
 - `*_segment_comparison.csv`
 - `*_overlay.mp4`
+
+Estos outputs se consideran artefactos locales y no deben versionarse, excepto los 4 CSV canonicos de referencia:
+
+- `bulgarian_angle_changes.csv`
+- `bulgarian_angles.csv`
+- `bulgarian_interpolated_segments.csv`
+- `bulgarian_segment_averages.csv`
 
 ## Variables de interes actuales
 
@@ -112,10 +121,26 @@ La evaluacion general del segmento toma la peor evaluacion entre las variables d
 - El overlay de referencia se reconstruye a partir de landmarks promedio normalizados; es una guia visual, no una "pose real" exacta.
 - Hay muchos archivos generados dentro de `bulgarian/`; conviene limpiar outputs viejos antes de versionar.
 
+## Politica de versionado
+
+Este repo debe contener:
+
+- codigo fuente `.py`
+- documentacion `.md`
+- la configuracion minima de Git como `.gitignore`
+- los 4 CSV canonicos de referencia en `gym/bulgarian/`
+
+No deben versionarse:
+
+- videos `.mp4`, `.mov`, `.avi`, `.mkv`, `.m4v`
+- CSV generados o usados como artefactos de trabajo, salvo los 4 canonicos de referencia
+- modelos `.task`
+- imagenes de referencia
+- carpetas de salidas como `bulgarian/ui_runs/`
+
 ## Archivos recomendados para leer primero
 
 - `README.md`
 - `SPEC.md`
 - `HANDOFF.md`
 - `AGENTS.md`
-

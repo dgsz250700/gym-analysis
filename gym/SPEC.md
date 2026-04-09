@@ -1,99 +1,120 @@
-# Spec
+# SPEC
 
-## Objetivo
+LLM-oriented functional specification for the current project.
 
-Construir un pipeline que:
+## Product goal
 
-1. procese videos de un ejercicio con MediaPipe Pose
-2. detecte landmarks relevantes
-3. derive variables biomecanicas de interes
-4. segmente el movimiento en fases comparables
-5. interpole cada fase a una escala comun `0..100`
-6. calcule una referencia promedio desde videos base
-7. compare un video input contra esa referencia
-8. produzca feedback cuantitativo, cualitativo y visual
+Build a local pipeline that:
 
-## Alcance actual
+1. processes exercise videos with MediaPipe Pose
+2. extracts pose landmarks
+3. derives biomechanical variables of interest
+4. segments the motion into comparable phases
+5. interpolates each phase to a common `0..100` scale
+6. builds an average reference from local reference videos
+7. compares a new input video against that reference
+8. produces quantitative, qualitative, and visual feedback
 
-Ejercicio soportado actualmente:
+## Supported scope
 
-- Bulgarian Split Squat
+Current scope only:
 
-Lado analizado:
+- exercise: Bulgarian Split Squat
+- default side: `right`
+- optional side: `left`
+  - implemented as an argument
+  - not fully validated with equivalent local data
 
-- `right` por defecto
-- `left` soportado por argumento, pero no esta completamente validado con dataset equivalente
-
-Variables de interes actuales:
+Current variables of interest:
 
 - `knee_angle_deg`
 - `torso_inclination_abs_deg`
 - `neck_inclination_abs_deg`
 
-## Entradas
+## Required local inputs
 
-### Referencia
+### Reference build inputs
 
-Videos base almacenados en:
+- local reference videos under `gym/bulgarian/`
+- local MediaPipe model file
 
-- `gym/bulgarian/`
+### Input analysis inputs
 
-Modelo:
+- one user-selected input video
+- reference averages CSV
+- reference angles CSV
+- reference changes CSV
+- MediaPipe model file
 
-- `gym/pose_landmarker_full.task`
+Important:
 
-### Input
+- the model and videos are local-only
+- the four canonical reference CSVs are expected to live in Git
 
-Un solo video elegido por usuario:
+## Functional requirements
 
-- por CLI en `gym_input.py`
-- por selector de archivos en `gym_input_ui.py`
+### FR-1 Pose processing
 
-## Pipeline funcional
+The system must process video frames with MediaPipe Pose and retain the landmarks needed to derive:
 
-### A. Construccion de referencia
+- knee angle
+- torso inclination
+- neck inclination
 
-Script:
+### FR-2 Smoothing
 
-- `../gym_try.py`
+The system must smooth pose points and derived angles with EMA before later stages use them.
 
-Responsabilidades:
+### FR-3 Change detection
 
-1. leer videos de referencia
-2. detectar landmarks con MediaPipe
-3. suavizar puntos y angulos con EMA
-4. calcular:
-   - rodilla
-   - torso
-   - cuello
-5. detectar cambios de direccion del angulo de rodilla
-6. formar segmentos entre eventos consecutivos
-7. interpolar cada segmento a `normalized_percent = 0..100`
-8. promediar segmentos por `segment_type`
+The system must detect direction changes from the knee angle time series.
 
-Outputs:
+Canonical event labels:
+
+- `baja_a_sube`
+- `sube_a_baja`
+
+### FR-4 Segment creation
+
+The system must build segments between consecutive direction change events.
+
+Canonical segment key:
+
+- `segment_type = start_change_direction|end_change_direction`
+
+### FR-5 Interpolation
+
+Each segment must be interpolated linearly to a normalized timeline:
+
+- domain: `0..100`
+- inclusive
+- one row per integer percent
+
+### FR-6 Reference generation
+
+The reference pipeline must aggregate interpolated segments by `segment_type` and `normalized_percent`.
+
+Canonical reference outputs:
 
 - `bulgarian_angles.csv`
 - `bulgarian_angle_changes.csv`
 - `bulgarian_interpolated_segments.csv`
 - `bulgarian_segment_averages.csv`
 
-### B. Analisis de un video input
+These four reference CSVs are valid versioned artifacts for this repository.
 
-Script:
+### FR-7 Input analysis
 
-- `bulgarian/gym_input.py`
+For a new input video, the backend must generate:
 
-Responsabilidades:
+- per-frame rows
+- change rows
+- interpolated segment rows
+- segment average rows
+- segment comparison rows
+- overlay video
 
-1. procesar un video individual
-2. generar sus CSV de landmarks, cambios, interpolacion y promedios
-3. cargar referencia promedio
-4. comparar cada segmento contra el promedio de su mismo `segment_type`
-5. traducir diferencia porcentual a feedback cualitativo
-6. generar overlay visual de input vs promedio
-
-Outputs por video:
+Canonical per-video outputs:
 
 - `*_angles.csv`
 - `*_angle_changes.csv`
@@ -102,90 +123,94 @@ Outputs por video:
 - `*_segment_comparison.csv`
 - `*_overlay.mp4`
 
-### C. UI
+### FR-8 Segment comparison
 
-Script:
+The comparison stage must compare each input segment only against the reference rows with the same `segment_type`.
 
-- `bulgarian/gym_input_ui.py`
-
-Responsabilidades:
-
-1. permitir seleccionar video
-2. correr `run_analysis(...)`
-3. mostrar el overlay dentro de la app
-4. mostrar resumen textual
-5. abrir el CSV de comparacion con un boton
-
-## Segmentacion
-
-Logica actual:
-
-- se observa el cambio de direccion del angulo de rodilla
-- `baja_a_sube` y `sube_a_baja` son los eventos canonicos
-- un segmento se define entre dos eventos consecutivos
-- `segment_type = start_change_direction|end_change_direction`
-
-## Interpolacion
-
-Metodo:
-
-- lineal
-- escala fija de `0..100`
-- una fila por entero en ese rango
-
-## Comparacion
-
-Base:
-
-- se compara cada segmento del input contra la referencia promedio del mismo `segment_type`
-
-Metricas:
+The comparison stage must emit at least:
 
 - `mean_signed_pct_diff_*`
 - `mean_abs_pct_diff_*`
 - `assessment_*`
 - `segment_assessment`
 
-Clasificacion actual:
+### FR-9 Qualitative assessment
 
-- `0-3%`: `buen ejercicio`
-- `4-8%`: `aun se puede mejorar`
-- `9-16%`: `es necesario ajustar`
-- `17-25%`: `realizar ajustes profundos`
-- `>25%`: `riesgo de lesion`
+Qualitative labels must be derived from mean absolute percentage difference:
 
-La clasificacion se aplica sobre la diferencia porcentual absoluta promedio.
+- `0-3`: `buen ejercicio`
+- `4-8`: `aun se puede mejorar`
+- `9-16`: `es necesario ajustar`
+- `17-25`: `realizar ajustes profundos`
+- `>25`: `riesgo de lesion`
 
-## Overlay visual
+`segment_assessment` must be the worst label across the field-level assessments.
 
-En el video final:
+### FR-10 Overlay rendering
 
-- verde = pose del input
-- naranja = pose promedio de referencia
-- texto = evaluacion general del segmento
+The final overlay video must show:
 
-La pose promedio se reconstruye a partir de landmarks de referencia normalizados por escala corporal relativa y luego se reescala sobre el cuerpo del input.
+- input pose in green
+- average reference pose in orange
+- segment assessment text
 
-## No objetivos actuales
+The reference pose must be reconstructed from normalized reference landmarks and then re-scaled onto the input body.
 
-- Soporte multi ejercicio generalizado
-- Configuracion dinamica de variables biomecanicas por ejercicio
-- Persistencia en base de datos
-- API web
-- entrenamiento de modelo propio
+### FR-11 UI workflow
 
-## Riesgos tecnicos
+The desktop UI must:
 
-- Dependencia fuerte en calidad/visibilidad de landmarks
-- Datos de referencia y scripts aun no estan completamente reorganizados
-- El repo Git real esta un nivel arriba de `gym/`
-- La referencia actual es especifica a un conjunto de videos y un solo ejercicio
+- let the user choose a video
+- call `run_analysis(...)`
+- write outputs into a unique timestamped run folder
+- show a text summary
+- play the overlay video
+- expose the comparison CSV path to the user
 
-## Criterios de aceptacion del estado actual
+## Data and contract invariants
 
-- se puede generar una referencia promedio a partir del dataset base
-- se puede procesar un video nuevo
-- se obtiene un CSV de comparacion por segmento
-- se obtiene un overlay visual sobre el video
-- existe una UI minima funcional para disparar el flujo y abrir el CSV de comparacion
+- The project is single-exercise today.
+- String labels in CSVs and code remain Spanish.
+- `INTEREST_FIELDS` must stay aligned across reference generation and input analysis.
+- CSV headers are a cross-file contract and should change only deliberately.
+- A missing or renamed `segment_type` breaks comparison.
 
+## Runtime behavior and error expectations
+
+- Missing video, model, or reference CSVs should fail early.
+- Unsupported video extensions should fail early.
+- If no comparable segments exist, comparison rows may be empty.
+- UI output isolation is required to avoid stale-file and file-lock issues.
+
+## Versioning policy
+
+The repository should keep only:
+
+- `.py`
+- `.md`
+- `.gitignore`
+- the four canonical reference CSVs in `gym/bulgarian/`
+
+The repository should not keep:
+
+- videos
+- non-canonical CSVs
+- `.task`
+- images
+- `ui_runs/`
+
+## Non-goals
+
+- generalized multi-exercise framework
+- dynamic exercise configuration UI
+- database persistence
+- web API
+- training a custom model
+
+## Acceptance criteria for the current state
+
+- reference data can be rebuilt from the local dataset
+- one input video can be processed end-to-end
+- a segment comparison CSV is produced
+- an overlay video is produced
+- the UI can trigger analysis and display the generated results
